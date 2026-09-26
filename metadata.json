@@ -1,0 +1,6 @@
+{
+  "name": "Vidyasaathi AI - Multilingual Homework Tutor",
+  "description": "Smart homework tutor for school students in Malayalam, English, and Hindi. Upload homework photos, get step-by-step guidance, solve math & science doubts, and practice curriculum subjects.",
+  "requestFramePermissions": ["microphone", "camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
