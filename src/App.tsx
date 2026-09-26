@@ -36,6 +36,7 @@ import {
   saveStudentProfile, 
   DEFAULT_PROFILE 
 } from './utils/storage';
+import { speakText, stopSpeaking, unlockMobileAudio } from './utils/speech';
 
 import { Header } from './components/Header';
 import { SubjectBar } from './components/SubjectBar';
@@ -45,6 +46,8 @@ import { NotebookView } from './components/NotebookView';
 import { ScratchpadModal } from './components/ScratchpadModal';
 import { DailyQuizView } from './components/DailyQuizView';
 import { ProfileModal } from './components/ProfileModal';
+import { TalkingAgent } from './components/TalkingAgent';
+import { MobileBottomNav } from './components/MobileBottomNav';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<'tutor' | 'notebook' | 'scratchpad' | 'quiz'>('tutor');
@@ -65,6 +68,11 @@ export default function App() {
   // Initialize data on client
   useEffect(() => {
     const loadedProfile = getStudentProfile();
+    // Ensure Andrew is the default active profile
+    if (!loadedProfile.name || loadedProfile.name === 'Ananya') {
+      loadedProfile.name = 'Andrew';
+      saveStudentProfile(loadedProfile);
+    }
     setProfile(loadedProfile);
     setLanguage(loadedProfile.defaultLanguage || 'Malayalam');
 
@@ -147,6 +155,28 @@ export default function App() {
       setErrorMessage(err.message || 'Something went wrong while solving the homework doubt.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Trigger Tutor Speech from Header or Mascot
+  const handleTriggerTutorSpeech = () => {
+    unlockMobileAudio();
+    if (activeSolution) {
+      const { solution } = activeSolution;
+      let text = '';
+      if (solution.malayalamAudioText && language === 'Malayalam') {
+        text = solution.malayalamAudioText;
+      } else {
+        text = `${profile.name}, here is the explanation for ${solution.conceptName}. ${solution.summary}. Final answer: ${solution.finalAnswer}.`;
+      }
+      speakText(text, activeSolution.language || language);
+    } else {
+      const greeting = language === 'Malayalam'
+        ? `നമസ്കാരം ${profile.name}! ഞാൻ നിങ്ങളുടെ പഠന സഹായിയാണ്. കണക്കിലോ സയൻസിലോ ഉള്ള ഹോംവർക്ക് സംശയങ്ങൾ എന്നോട് ചോദിക്കാം.`
+        : language === 'Hindi'
+        ? `नमस्ते ${profile.name}! मैं आपका विद्यासाथी ट्यूटर हूँ। मुझसे कोई भी गृहकार्य प्रश्न पूछें!`
+        : `Hello ${profile.name}! I am your AI homework tutor Mitra. Ask me any doubt or upload a photo, and I will guide you!`;
+      speakText(greeting, language);
     }
   };
 
@@ -262,7 +292,7 @@ export default function App() {
   const currentSubjectObj = SUBJECTS.find((s) => s.id === selectedSubject) || SUBJECTS[0];
 
   return (
-    <div className="min-h-screen flex flex-col bg-linear-to-b from-amber-50/50 via-white to-amber-50/30">
+    <div className="min-h-screen flex flex-col bg-linear-to-b from-amber-50/50 via-white to-amber-50/30 pb-24 md:pb-8">
       
       {/* Top Header */}
       <Header
@@ -273,14 +303,15 @@ export default function App() {
         profile={profile}
         onOpenProfileModal={() => setIsProfileModalOpen(true)}
         savedCount={homeworkList.length}
+        onTriggerTutorSpeech={handleTriggerTutorSpeech}
       />
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-7 space-y-5">
         
         {/* Welcome & Curriculum Banner */}
-        <section className="no-print bg-linear-to-r from-amber-500 via-orange-500 to-rose-500 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden">
-          <div className="absolute -right-8 -bottom-10 opacity-15 text-9xl pointer-events-none select-none">
+        <section className="no-print bg-linear-to-r from-amber-500 via-orange-500 to-rose-500 rounded-3xl p-5 sm:p-7 text-white shadow-xl relative overflow-hidden">
+          <div className="absolute -right-8 -bottom-10 opacity-15 text-8xl sm:text-9xl pointer-events-none select-none">
             📚
           </div>
 
@@ -288,34 +319,34 @@ export default function App() {
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/20 backdrop-blur-md text-xs font-bold border border-white/30">
               <span>{profile.avatar}</span>
               <span>Namaskaram, {profile.name}! (നമസ്കാരം)</span>
-              <span className="opacity-75">• {profile.grade} {profile.board}</span>
+              <span className="opacity-80">• {profile.grade} {profile.board}</span>
             </div>
 
-            <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold font-heading tracking-tight leading-tight">
-              Ask your homework doubts in Malayalam, English & Hindi!
+            <h2 className="text-xl sm:text-3xl md:text-4xl font-extrabold font-heading tracking-tight leading-tight">
+              Ask homework doubts in Malayalam, English & Hindi!
             </h2>
 
-            <p className="text-sm sm:text-base text-amber-50 font-medium leading-relaxed">
-              Upload textbook photos or type questions in Mathematics, Science, Malayalam, Hindi & English. Get step-by-step guidance and listen to voice explanations!
+            <p className="text-xs sm:text-sm text-amber-50 font-medium leading-relaxed">
+              Upload textbook photos or type questions in Mathematics, Science, Malayalam, Hindi & English. Get step-by-step guidance and hear Mitra talk!
             </p>
 
-            {/* Quick stats / prompts */}
-            <div className="pt-2 flex flex-wrap items-center gap-3 text-xs font-semibold">
+            {/* Quick action buttons */}
+            <div className="pt-1.5 flex flex-wrap items-center gap-2 text-xs font-semibold">
               <button
                 onClick={() => setCurrentTab('tutor')}
-                className="bg-white text-amber-900 px-4 py-2 rounded-2xl shadow-md hover:bg-amber-50 transition-all font-bold cursor-pointer"
+                className="bg-white text-amber-900 px-3.5 py-1.5 rounded-xl shadow-md hover:bg-amber-50 transition-all font-bold cursor-pointer"
               >
                 ✨ Solve Doubt Now
               </button>
               <button
                 onClick={() => setCurrentTab('quiz')}
-                className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-2xl border border-white/30 transition-all cursor-pointer"
+                className="bg-white/20 hover:bg-white/30 text-white px-3.5 py-1.5 rounded-xl border border-white/30 transition-all cursor-pointer"
               >
-                🎯 3-Min Daily Practice
+                🎯 Daily Practice Quiz
               </button>
               <button
                 onClick={() => setIsScratchpadOpen(true)}
-                className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-2xl border border-white/30 transition-all cursor-pointer"
+                className="bg-white/20 hover:bg-white/30 text-white px-3.5 py-1.5 rounded-xl border border-white/30 transition-all cursor-pointer"
               >
                 ✏️ Rough Scratchpad
               </button>
@@ -323,9 +354,22 @@ export default function App() {
           </div>
         </section>
 
+        {/* Talking Tutor Agent (Interactive Voice Companion) */}
+        <section className="no-print">
+          <TalkingAgent
+            profile={profile}
+            language={language}
+            activeHomework={activeSolution}
+            onOpenVoiceMic={() => setCurrentTab('tutor')}
+            onAskDoubtPrompt={(prompt) => {
+              setCurrentTab('tutor');
+            }}
+          />
+        </section>
+
         {/* Tab Content Rendering */}
         {currentTab === 'tutor' && (
-          <div className="space-y-6">
+          <div className="space-y-5">
             
             {/* Subject Selector Bar */}
             <section className="no-print">
@@ -365,7 +409,7 @@ export default function App() {
             {activeSolution && (
               <section className="pt-2">
                 <div className="flex items-center justify-between mb-3 px-2">
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-600 flex items-center gap-2">
+                  <h3 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-600 flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-amber-600" />
                     <span>Tutor Solution & Step-by-Step Guide</span>
                   </h3>
@@ -392,8 +436,8 @@ export default function App() {
 
             {/* Recent Homework Queries (Quick History) */}
             {homeworkList.length > 1 && (
-              <section className="no-print pt-6">
-                <div className="flex items-center justify-between mb-3 px-2">
+              <section className="no-print pt-4">
+                <div className="flex items-center justify-between mb-2.5 px-2">
                   <h3 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
                     <History className="w-4 h-4 text-slate-400" />
                     <span>Recent Doubts Solved (സമീപകാല ചോദ്യങ്ങൾ)</span>
@@ -402,11 +446,11 @@ export default function App() {
                     onClick={() => setCurrentTab('notebook')}
                     className="text-xs text-amber-800 font-bold hover:underline"
                   >
-                    View All in Notebook →
+                    View All →
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 sm:gap-3">
                   {homeworkList.slice(0, 3).map((item) => {
                     const sub = SUBJECTS.find((s) => s.id === item.subject) || SUBJECTS[0];
                     return (
@@ -489,6 +533,17 @@ export default function App() {
 
       </main>
 
+      {/* Mobile Bottom Navigation Bar (Phone & Tablet Friendly) */}
+      <MobileBottomNav
+        currentTab={currentTab}
+        onSelectTab={setCurrentTab}
+        savedCount={homeworkList.length}
+        onOpenTalkingAgent={() => {
+          setCurrentTab('tutor');
+          handleTriggerTutorSpeech();
+        }}
+      />
+
       {/* Scratchpad Modal */}
       <ScratchpadModal
         isOpen={isScratchpadOpen}
@@ -505,12 +560,12 @@ export default function App() {
       />
 
       {/* Footer */}
-      <footer className="no-print mt-12 py-6 border-t border-amber-100 bg-white/60 text-center text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+      <footer className="no-print mt-8 py-5 border-t border-amber-100 bg-white/60 text-center text-xs text-slate-500">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2.5">
           <p className="font-medium">
-            Vidyasaathi AI (വിദ്യാസാഥി) • School Homework Tutor for {profile.grade} {profile.board}
+            Vidyasaathi AI (വിദ്യാസാഥി) • School Homework Tutor for {profile.name} ({profile.grade} {profile.board})
           </p>
-          <p className="text-slate-400">
+          <p className="text-slate-400 text-[11px]">
             Supports Malayalam (മലയാളം), English, and Hindi (हिन्दी)
           </p>
         </div>

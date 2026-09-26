@@ -4,7 +4,7 @@ const HOMEWORK_STORAGE_KEY = 'vidyasaathi_homework_history_v1';
 const PROFILE_STORAGE_KEY = 'vidyasaathi_student_profile_v1';
 
 export const DEFAULT_PROFILE: StudentProfile = {
-  name: 'Ananya',
+  name: 'Andrew',
   grade: 'Class 5',
   board: 'CBSE (Kerala)',
   avatar: '🦉',
@@ -145,7 +145,12 @@ export function getStudentProfile(): StudentProfile {
       localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(DEFAULT_PROFILE));
       return DEFAULT_PROFILE;
     }
-    return JSON.parse(raw);
+    const profile = JSON.parse(raw);
+    if (profile.name === 'Ananya') {
+      profile.name = 'Andrew';
+      localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+    }
+    return profile;
   } catch (e) {
     return DEFAULT_PROFILE;
   }

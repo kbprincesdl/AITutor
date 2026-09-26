@@ -1,6 +1,31 @@
 import { AppLanguage } from '../types';
 
 let currentAudio: HTMLAudioElement | null = null;
+let speakingStatus = false;
+const speechListeners = new Set<(isSpeaking: boolean) => void>();
+
+function setSpeaking(isSpeaking: boolean) {
+  speakingStatus = isSpeaking;
+  speechListeners.forEach((fn) => {
+    try {
+      fn(isSpeaking);
+    } catch (e) {
+      console.warn('Speech listener error:', e);
+    }
+  });
+}
+
+export function subscribeSpeechStatus(fn: (isSpeaking: boolean) => void): () => void {
+  speechListeners.add(fn);
+  fn(speakingStatus);
+  return () => {
+    speechListeners.delete(fn);
+  };
+}
+
+export function isSpeakingNow(): boolean {
+  return speakingStatus;
+}
 
 export function stopSpeaking() {
   if (currentAudio) {
@@ -9,6 +34,21 @@ export function stopSpeaking() {
   }
   if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
     window.speechSynthesis.cancel();
+  }
+  setSpeaking(false);
+}
+
+// Unlock audio on iOS/Android mobile user interaction
+export function unlockMobileAudio() {
+  if (typeof window === 'undefined') return;
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (AudioCtx) {
+      const ctx = new AudioCtx();
+      ctx.resume().then(() => ctx.close()).catch(() => {});
+    }
+  } catch (e) {
+    // ignore
   }
 }
 
@@ -21,7 +61,14 @@ export async function speakText(
   stopSpeaking();
   if (!text || text.trim().length === 0) return;
 
+  unlockMobileAudio();
+  setSpeaking(true);
   onStart?.();
+
+  const handleFinished = () => {
+    setSpeaking(false);
+    onEnd?.();
+  };
 
   // Try server-side TTS first
   try {
@@ -38,10 +85,10 @@ export async function speakText(
         currentAudio = new Audio(audioSrc);
         currentAudio.onended = () => {
           currentAudio = null;
-          onEnd?.();
+          handleFinished();
         };
         currentAudio.onerror = () => {
-          fallbackSpeechSynthesis(text, language, onEnd);
+          fallbackSpeechSynthesis(text, language, handleFinished);
         };
         await currentAudio.play();
         return;
@@ -52,7 +99,7 @@ export async function speakText(
   }
 
   // Fallback to browser SpeechSynthesis
-  fallbackSpeechSynthesis(text, language, onEnd);
+  fallbackSpeechSynthesis(text, language, handleFinished);
 }
 
 function fallbackSpeechSynthesis(
@@ -67,10 +114,11 @@ function fallbackSpeechSynthesis(
 
   window.speechSynthesis.cancel();
 
+  // Strip markdown, asterisks, brackets, and math symbols for clean pronunciation
   const cleaned = text
     .replace(/[#*`_~]/g, '')
     .replace(/\(.*?\)/g, '')
-    .slice(0, 400);
+    .slice(0, 450);
 
   const utterance = new SpeechSynthesisUtterance(cleaned);
   utterance.rate = 0.92;
@@ -132,7 +180,6 @@ export async function testMicrophonePermission(): Promise<boolean> {
   }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    // Stop all tracks after checking
     stream.getTracks().forEach((track) => track.stop());
     return true;
   } catch (err) {
@@ -159,7 +206,6 @@ export async function startVoiceInput(options: VoiceCaptureOptions): Promise<Voi
   const SpeechRecognition =
     (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-  // Function to monitor microphone volume level for UI visualizer
   const setupVolumeMeter = (stream: MediaStream) => {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -203,7 +249,6 @@ export async function startVoiceInput(options: VoiceCaptureOptions): Promise<Voi
     options.onStatusChange?.('idle');
   };
 
-  // Request user media stream to guarantee microphone prompt & check permissions
   try {
     mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -216,9 +261,9 @@ export async function startVoiceInput(options: VoiceCaptureOptions): Promise<Voi
   } catch (err: any) {
     cleanup();
     if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-      options.onError('Microphone access was denied. Please allow microphone access in your browser address bar to speak your doubt.');
+      options.onError('Microphone access was denied. Please allow microphone access in your browser address bar.');
     } else if (err.name === 'NotFoundError') {
-      options.onError('No microphone detected on your device. Please plug in a microphone or type your question.');
+      options.onError('No microphone detected on your device.');
     } else {
       options.onError(`Unable to access microphone: ${err.message || 'Check permissions'}`);
     }
@@ -227,7 +272,6 @@ export async function startVoiceInput(options: VoiceCaptureOptions): Promise<Voi
 
   options.onStatusChange?.('listening');
 
-  // Strategy 1: Use Web Speech API if supported by browser
   if (SpeechRecognition) {
     try {
       const recognition = new SpeechRecognition();
@@ -254,9 +298,7 @@ export async function startVoiceInput(options: VoiceCaptureOptions): Promise<Voi
 
       recognition.onerror = (e: any) => {
         console.warn('SpeechRecognition error:', e);
-        // If recognition failed or aborted without result, fall back to MediaRecorder
         if (!gotResult && !isStopped && mediaStream) {
-          console.log('Falling back to Gemini audio recording transcribe...');
           fallbackToMediaRecorder();
         } else {
           cleanup();
@@ -265,7 +307,7 @@ export async function startVoiceInput(options: VoiceCaptureOptions): Promise<Voi
 
       recognition.onend = () => {
         if (!gotResult && !isStopped && mediaRecorder?.state === 'recording') {
-          // MediaRecorder is handling fallback
+          // handled by recorder
         } else if (!gotResult && !isStopped) {
           cleanup();
         }
@@ -280,11 +322,9 @@ export async function startVoiceInput(options: VoiceCaptureOptions): Promise<Voi
         },
       };
     } catch (e) {
-      console.warn('Failed to start SpeechRecognition, using MediaRecorder:', e);
       fallbackToMediaRecorder();
     }
   } else {
-    // Strategy 2: MediaRecorder with Gemini Transcribe
     fallbackToMediaRecorder();
   }
 

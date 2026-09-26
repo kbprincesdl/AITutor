@@ -59,6 +59,7 @@ export const HomeworkInput: React.FC<HomeworkInputProps> = ({
   const [speechError, setSpeechError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const voiceControllerRef = useRef<VoiceCaptureController | null>(null);
 
   // Sync external image from scratchpad if passed
@@ -424,10 +425,19 @@ export const HomeworkInput: React.FC<HomeworkInputProps> = ({
         {/* Action Bar (Upload Photo, Mic, Scratchpad, Submit) */}
         <div className="mt-4 flex flex-wrap items-center justify-between gap-2.5 pt-2 border-t border-amber-100">
           
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Hidden File Input */}
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+            {/* Hidden Gallery Input */}
             <input
               ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleFileChange}
+              className="hidden"
+            />
+
+            {/* Hidden Mobile Camera Direct Capture Input */}
+            <input
+              ref={cameraInputRef}
               type="file"
               accept="image/*"
               capture="environment"
@@ -435,21 +445,31 @@ export const HomeworkInput: React.FC<HomeworkInputProps> = ({
               className="hidden"
             />
 
-            {/* Upload Homework Photo Button */}
+            {/* Camera Snap Button (Mobile Priority) */}
+            <button
+              type="button"
+              onClick={() => cameraInputRef.current?.click()}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-amber-50 hover:bg-amber-100/80 text-amber-900 border border-amber-200 transition-all cursor-pointer active:scale-95"
+            >
+              <Camera className="w-4 h-4 text-amber-600" />
+              <span>Camera (ക്യാമറ)</span>
+            </button>
+
+            {/* Gallery Upload Button */}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-amber-50 hover:bg-amber-100/80 text-amber-900 border border-amber-200 transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-white hover:bg-amber-50 text-slate-700 border border-amber-200 transition-all cursor-pointer active:scale-95"
             >
-              <Camera className="w-4 h-4 text-amber-600" />
-              <span>Upload Photo (ഫോട്ടോ)</span>
+              <ImageIcon className="w-4 h-4 text-orange-500" />
+              <span>Gallery (ഫോട്ടോ)</span>
             </button>
 
             {/* Mic Button on Action Bar */}
             <button
               type="button"
               onClick={handleToggleVoiceInput}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer active:scale-95 ${
                 voiceStatus === 'listening'
                   ? 'bg-rose-500 text-white border-rose-600 animate-pulse'
                   : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-200'
@@ -463,7 +483,7 @@ export const HomeworkInput: React.FC<HomeworkInputProps> = ({
             <button
               type="button"
               onClick={onOpenScratchpad}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-teal-50 hover:bg-teal-100/80 text-teal-900 border border-teal-200 transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-teal-50 hover:bg-teal-100/80 text-teal-900 border border-teal-200 transition-all cursor-pointer active:scale-95"
             >
               <span>✏️</span>
               <span className="hidden sm:inline">Draw / Doodle Work</span>
