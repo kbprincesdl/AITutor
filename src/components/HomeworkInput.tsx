@@ -57,6 +57,7 @@ export const HomeworkInput: React.FC<HomeworkInputProps> = ({
   const [voiceStatus, setVoiceStatus] = useState<'idle' | 'listening' | 'transcribing'>('idle');
   const [audioLevel, setAudioLevel] = useState<number>(0);
   const [speechError, setSpeechError] = useState<string | null>(null);
+  const [voiceSuccessMessage, setVoiceSuccessMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -78,12 +79,11 @@ export const HomeworkInput: React.FC<HomeworkInputProps> = ({
     if (voiceStatus !== 'idle') {
       voiceControllerRef.current?.stop();
       voiceControllerRef.current = null;
-      setVoiceStatus('idle');
-      setAudioLevel(0);
       return;
     }
 
     setSpeechError(null);
+    setVoiceSuccessMessage(null);
 
     const controller = await startVoiceInput({
       language,
@@ -97,7 +97,8 @@ export const HomeworkInput: React.FC<HomeworkInputProps> = ({
         }
       },
       onResult: (transcript) => {
-        setQuery((prev) => (prev ? `${prev} ${transcript}` : transcript));
+        setQuery(transcript);
+        setVoiceSuccessMessage(transcript);
         setVoiceStatus('idle');
         setAudioLevel(0);
         voiceControllerRef.current = null;
@@ -369,6 +370,28 @@ export const HomeworkInput: React.FC<HomeworkInputProps> = ({
               className="text-rose-400 hover:text-rose-600"
             >
               <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Voice Success Confirmation Badge */}
+        {voiceSuccessMessage && (
+          <div className="mt-2.5 p-2.5 bg-emerald-50 border border-emerald-300 rounded-2xl flex items-center justify-between gap-2 text-xs text-emerald-900 animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <div>
+                <span className="font-bold">Voice written into question!</span>{' '}
+                <span className="text-emerald-800 font-medium line-clamp-1 italic">
+                  "{voiceSuccessMessage}"
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setVoiceSuccessMessage(null)}
+              className="text-emerald-500 hover:text-emerald-700 p-1"
+            >
+              <X className="w-3.5 h-3.5" />
             </button>
           </div>
         )}

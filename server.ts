@@ -25,20 +25,31 @@ const ai = new GoogleGenAI({
   },
 });
 
-// Helper to sanitize base64 strings
-function parseBase64(dataUrlOrRaw: string): { data: string; mimeType: string } {
+// Helper to sanitize base64 strings from data URLs
+function parseBase64(dataUrlOrRaw: string, defaultMime = 'image/jpeg'): { data: string; mimeType: string } {
   if (dataUrlOrRaw.startsWith('data:')) {
-    const matches = dataUrlOrRaw.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
-    if (matches && matches.length === 3) {
+    const commaIndex = dataUrlOrRaw.indexOf(',');
+    if (commaIndex !== -1) {
+      const meta = dataUrlOrRaw.slice(5, commaIndex); // e.g. "audio/webm;codecs=opus;base64" or "image/png;base64"
+      const rawData = dataUrlOrRaw.slice(commaIndex + 1);
+      const semicolonIndex = meta.indexOf(';');
+      let mimeType = semicolonIndex !== -1 ? meta.slice(0, semicolonIndex).trim() : meta.trim();
+      // Normalize common audio mimes
+      if (mimeType.includes('audio/webm')) mimeType = 'audio/webm';
+      else if (mimeType.includes('audio/mp4')) mimeType = 'audio/mp4';
+      else if (mimeType.includes('audio/aac')) mimeType = 'audio/aac';
+      else if (mimeType.includes('audio/wav')) mimeType = 'audio/wav';
+      else if (mimeType.includes('audio/ogg')) mimeType = 'audio/ogg';
+
       return {
-        mimeType: matches[1],
-        data: matches[2],
+        mimeType: mimeType || defaultMime,
+        data: rawData.trim(),
       };
     }
   }
   return {
-    mimeType: 'image/jpeg',
-    data: dataUrlOrRaw,
+    mimeType: defaultMime,
+    data: dataUrlOrRaw.trim(),
   };
 }
 

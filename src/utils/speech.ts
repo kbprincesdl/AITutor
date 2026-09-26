@@ -114,7 +114,6 @@ function fallbackSpeechSynthesis(
 
   window.speechSynthesis.cancel();
 
-  // Strip markdown, asterisks, brackets, and math symbols for clean pronunciation
   const cleaned = text
     .replace(/[#*`_~]/g, '')
     .replace(/\(.*?\)/g, '')
@@ -156,7 +155,7 @@ function fallbackSpeechSynthesis(
 }
 
 // -------------------------------------------------------------
-// Unified Microphone Audio Capture & Speech-to-Text Controller
+// Unified Mobile & Desktop Voice Capture (Speech-to-Text)
 // -------------------------------------------------------------
 
 export interface VoiceCaptureController {
@@ -172,25 +171,9 @@ export interface VoiceCaptureOptions {
 }
 
 /**
- * Checks and requests microphone permission
- */
-export async function testMicrophonePermission(): Promise<boolean> {
-  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-    return false;
-  }
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach((track) => track.stop());
-    return true;
-  } catch (err) {
-    console.warn('Microphone permission check error:', err);
-    return false;
-  }
-}
-
-/**
- * Starts microphone capture using Web Speech API with automatic
- * MediaRecorder fallback to Gemini Speech-to-Text API.
+ * Robust cross-platform voice input for mobile & desktop
+ * Uses MediaRecorder with parallel Web Speech recognition,
+ * ensuring speech is ALWAYS transcribed accurately via Gemini if needed.
  */
 export async function startVoiceInput(options: VoiceCaptureOptions): Promise<VoiceCaptureController | null> {
   if (typeof window === 'undefined') return null;
@@ -202,10 +185,13 @@ export async function startVoiceInput(options: VoiceCaptureOptions): Promise<Voi
   let animFrameId: number | null = null;
   let mediaRecorder: MediaRecorder | null = null;
   let recordedChunks: Blob[] = [];
+  let recognitionInstance: any = null;
+  let webSpeechTranscript = '';
 
   const SpeechRecognition =
     (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
+  // 1. Setup AudioContext Volume Meter for real-time visualizer
   const setupVolumeMeter = (stream: MediaStream) => {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -231,7 +217,7 @@ export async function startVoiceInput(options: VoiceCaptureOptions): Promise<Voi
       };
       updateLevel();
     } catch (e) {
-      console.warn('Audio meter init error:', e);
+      console.warn('Audio meter init warning:', e);
     }
   };
 
@@ -249,6 +235,7 @@ export async function startVoiceInput(options: VoiceCaptureOptions): Promise<Voi
     options.onStatusChange?.('idle');
   };
 
+  // 2. Request user microphone
   try {
     mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -261,103 +248,69 @@ export async function startVoiceInput(options: VoiceCaptureOptions): Promise<Voi
   } catch (err: any) {
     cleanup();
     if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-      options.onError('Microphone access was denied. Please allow microphone access in your browser address bar.');
+      options.onError('Microphone access was denied. Please tap the lock icon in your browser address bar and enable Microphone.');
     } else if (err.name === 'NotFoundError') {
-      options.onError('No microphone detected on your device.');
+      options.onError('No microphone found on your device. Please plug in a microphone or headset.');
     } else {
-      options.onError(`Unable to access microphone: ${err.message || 'Check permissions'}`);
+      options.onError(`Unable to access microphone: ${err.message || 'Check browser permissions'}`);
     }
     return null;
   }
 
   options.onStatusChange?.('listening');
 
-  if (SpeechRecognition) {
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = false;
-
-      let langCode = 'en-IN';
-      if (options.language === 'Malayalam') langCode = 'ml-IN';
-      else if (options.language === 'Hindi') langCode = 'hi-IN';
-      else if (options.language === 'Manglish') langCode = 'en-IN';
-
-      recognition.lang = langCode;
-
-      let gotResult = false;
-
-      recognition.onresult = (event: any) => {
-        gotResult = true;
-        const transcript = event.results[0]?.[0]?.transcript || '';
-        if (transcript.trim()) {
-          options.onResult(transcript.trim());
-        }
-        cleanup();
-      };
-
-      recognition.onerror = (e: any) => {
-        console.warn('SpeechRecognition error:', e);
-        if (!gotResult && !isStopped && mediaStream) {
-          fallbackToMediaRecorder();
-        } else {
-          cleanup();
-        }
-      };
-
-      recognition.onend = () => {
-        if (!gotResult && !isStopped && mediaRecorder?.state === 'recording') {
-          // handled by recorder
-        } else if (!gotResult && !isStopped) {
-          cleanup();
-        }
-      };
-
-      recognition.start();
-
-      return {
-        stop: () => {
-          recognition.stop();
-          cleanup();
-        },
-      };
-    } catch (e) {
-      fallbackToMediaRecorder();
+  // 3. Start MediaRecorder IMMEDIATELY to capture every single word spoken
+  try {
+    let recorderOptions: MediaRecorderOptions | undefined = undefined;
+    const candidates = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4',
+      'audio/aac',
+      'audio/ogg',
+    ];
+    for (const cand of candidates) {
+      if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(cand)) {
+        recorderOptions = { mimeType: cand };
+        break;
+      }
     }
-  } else {
-    fallbackToMediaRecorder();
-  }
 
-  function fallbackToMediaRecorder() {
-    if (!mediaStream) return;
-    try {
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm')
-        ? 'audio/webm'
-        : MediaRecorder.isTypeSupported('audio/mp4')
-        ? 'audio/mp4'
-        : '';
+    mediaRecorder = new MediaRecorder(mediaStream, recorderOptions);
+    recordedChunks = [];
 
-      mediaRecorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : undefined);
-      recordedChunks = [];
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        recordedChunks.push(e.data);
+      }
+    };
 
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) recordedChunks.push(e.data);
-      };
+    mediaRecorder.onstop = async () => {
+      // If Web Speech API already provided a clean result, use it!
+      if (webSpeechTranscript.trim().length > 0) {
+        options.onResult(webSpeechTranscript.trim());
+        cleanup();
+        return;
+      }
 
-      mediaRecorder.onstop = async () => {
-        if (isStopped || recordedChunks.length === 0) {
-          cleanup();
-          return;
-        }
+      // Otherwise transcribe via server Gemini API
+      if (recordedChunks.length === 0) {
+        options.onError('No audio recorded. Please hold the mic and speak clearly.');
+        cleanup();
+        return;
+      }
 
-        options.onStatusChange?.('transcribing');
+      options.onStatusChange?.('transcribing');
 
-        try {
-          const blob = new Blob(recordedChunks, { type: mediaRecorder?.mimeType || 'audio/webm' });
-          const reader = new FileReader();
-          reader.readAsDataURL(blob);
-          reader.onloadend = async () => {
-            const base64Audio = reader.result as string;
+      try {
+        const mimeType = mediaRecorder?.mimeType || recordedChunks[0]?.type || 'audio/webm';
+        const blob = new Blob(recordedChunks, { type: mimeType });
+
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+          const base64Audio = reader.result as string;
+
+          try {
             const res = await fetch('/api/tutor/transcribe', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -370,36 +323,96 @@ export async function startVoiceInput(options: VoiceCaptureOptions): Promise<Voi
 
             if (res.ok) {
               const data = await res.json();
-              if (data.text) {
-                options.onResult(data.text);
+              if (data.text && data.text.trim().length > 0) {
+                options.onResult(data.text.trim());
               } else {
-                options.onError('Could not hear clearly. Please try speaking again.');
+                options.onError('Could not hear speech clearly. Please try speaking again.');
               }
             } else {
-              options.onError('Transcription service busy. Please try again or type your question.');
+              const errData = await res.json().catch(() => ({}));
+              options.onError(errData.error || 'Speech transcription failed. Please try again.');
             }
+          } catch (netErr: any) {
+            options.onError('Network error while transcribing voice.');
+          } finally {
             cleanup();
-          };
-        } catch (err: any) {
-          options.onError('Audio processing failed: ' + err.message);
-          cleanup();
+          }
+        };
+
+        reader.readAsDataURL(blob);
+      } catch (err: any) {
+        options.onError('Audio processing failed: ' + err.message);
+        cleanup();
+      }
+    };
+
+    // Request data every 250ms so chunks are continually buffered
+    mediaRecorder.start(250);
+  } catch (recorderErr) {
+    console.warn('MediaRecorder init error:', recorderErr);
+  }
+
+  // 4. Concurrently run Web Speech API if supported
+  if (SpeechRecognition) {
+    try {
+      recognitionInstance = new SpeechRecognition();
+      recognitionInstance.continuous = true;
+      recognitionInstance.interimResults = true;
+
+      let langCode = 'en-IN';
+      if (options.language === 'Malayalam') langCode = 'ml-IN';
+      else if (options.language === 'Hindi') langCode = 'hi-IN';
+      else if (options.language === 'Manglish') langCode = 'en-IN';
+
+      recognitionInstance.lang = langCode;
+
+      recognitionInstance.onresult = (event: any) => {
+        let interim = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const transcript = event.results[i][0]?.transcript || '';
+          if (event.results[i].isFinal) {
+            webSpeechTranscript += ' ' + transcript;
+          } else {
+            interim += transcript;
+          }
+        }
+        if (webSpeechTranscript.trim()) {
+          options.onResult(webSpeechTranscript.trim());
         }
       };
 
-      mediaRecorder.start();
-    } catch (e: any) {
-      options.onError('Media recording not supported: ' + e.message);
-      cleanup();
+      recognitionInstance.onerror = (e: any) => {
+        console.warn('SpeechRecognition browser error, relying on MediaRecorder:', e);
+      };
+
+      recognitionInstance.onend = () => {
+        // Recognition ended; MediaRecorder will finalize on stop()
+      };
+
+      recognitionInstance.start();
+    } catch (e) {
+      console.warn('Web Speech API start error:', e);
     }
   }
 
+  // 5. Controller return
+  const stopCapture = () => {
+    if (isStopped) return;
+    
+    if (recognitionInstance) {
+      try {
+        recognitionInstance.stop();
+      } catch (e) {}
+    }
+
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      mediaRecorder.stop();
+    } else {
+      cleanup();
+    }
+  };
+
   return {
-    stop: () => {
-      if (mediaRecorder && mediaRecorder.state === 'recording') {
-        mediaRecorder.stop();
-      } else {
-        cleanup();
-      }
-    },
+    stop: stopCapture,
   };
 }
